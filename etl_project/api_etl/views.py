@@ -60,8 +60,12 @@ def api_produits_filtre(request):
     cat_id = request.GET.get("catID")
 
     # 🔹 Vérification de la validité du type de requête
-    if type_param not in QUERY_MAP:
+    if type_param not in QUERY_MAP and type_param != "top-1":
         return JsonResponse({"error": "Type de requête inconnu"}, status=400)
+
+    if type_param == "top-1": 
+        return get_best_magasin_for_category(conn, cat_id)
+
     # 🔹 Construction de la requête SQL
     sql_query = QUERY_MAP[type_param]
 
@@ -77,3 +81,45 @@ def api_produits_filtre(request):
     # 🔹 Conversion du résultat en JSON et envoi de la réponse
     data = df_result.to_dict(orient="records")
     return JsonResponse(data, safe=False)
+
+
+def get_best_magasin_for_category(conn, cat_id):
+    """
+    Fonction qui trouve le meilleur magasin pour une catégorie donnée selon le score :
+    - Nombre de produits vendus pour cette catégorie * 0.4
+    - Nombre de lignes d'opération * 0.3
+    - Nombre de fabricants présents dans ce magasin pour cette catégorie * 0.3
+    """
+
+    # Récupérer les 10 meilleurs magasins pour cette catégorie
+    top_10_query = QUERY_MAP["top-magasins-cat"].format(catID=cat_id)
+    df_top_10 = pd.read_sql(top_10_query, conn)
+
+    if df_top_10.empty:
+        return JsonResponse({"error": "Aucun magasin trouvé pour cette catégorie"}, status=404)
+
+    top_mag_ids = tuple(df_top_10["magID"].tolist())
+
+    # Sélectionner le meilleur magasin parmi ces 10
+    query_best_seller = f"""
+        SELECT magID,
+            COUNT(DISTINCT fabID) AS total_fabricants,
+            COUNT(DISTINCT prodID) AS total_produits,
+            COUNT(*) AS total_ventes,
+            -- Calcul du score combiné avec pondération
+            (COUNT(DISTINCT prodID) * 0.3 +
+            COUNT(*) * 0.6 +
+            COUNT(DISTINCT fabID) * 0.1) AS score
+        FROM pointDeVente_tous
+        WHERE catID = {cat_id} AND magID IN {top_mag_ids}
+        GROUP BY magID
+        ORDER BY score DESC
+        LIMIT 1;
+    """
+    
+    df_best_seller = pd.read_sql(query_best_seller, conn)
+
+    if df_best_seller.empty:
+        return JsonResponse({"error": "Aucun meilleur magasin trouvé"}, status=404)
+
+    return JsonResponse(df_best_seller.to_dict(orient="records"), safe=False)

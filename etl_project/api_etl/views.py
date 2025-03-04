@@ -24,10 +24,10 @@ QUERY_MAP = {
             COUNT(DISTINCT prodID) AS total_produits,
             COUNT(*) AS total_ventes,
             -- Calcul du score combiné avec pondération
-            (COUNT(DISTINCT fabID) * 0.4 +
-                COUNT(DISTINCT catID) * 0.3 +
-                COUNT(DISTINCT prodID) * 0.2 +
-                COUNT(*) * 0.1) AS score
+            (COUNT(DISTINCT fabID) * 0.1 +
+                COUNT(DISTINCT catID) * 0.2 +
+                COUNT(DISTINCT prodID) * 0.3 +
+                COUNT(*) * 0.4) AS score
         FROM pointDeVente_tous
         GROUP BY magID
         ORDER BY score DESC
@@ -37,46 +37,43 @@ QUERY_MAP = {
 }
 
 def api_produits_filtre(request):
+    # 🔹 Définition des chemins des fichiers CSV
     produits_csv = os.path.join(settings.DATA_DIR, 'produits-tous.csv')
+    point_de_vente_csv = os.path.join(settings.DATA_DIR, 'pointsDeVente-tous.csv')
 
-    # 🔹 Vérifier si le fichier CSV existe
-    if not os.path.exists(produits_csv):
-        return JsonResponse({"error": "Fichier CSV non trouvé"}, status=404)
+    # 🔹 Vérification de l'existence des fichiers CSV
+    for fichier in [produits_csv, point_de_vente_csv]:
+        if not os.path.exists(fichier):
+            return JsonResponse({"error": f"Fichier {os.path.basename(fichier)} non trouvé"}, status=404)
 
-    # 🔹 Charger le CSV
+    # 🔹 Chargement des fichiers CSV dans des DataFrames pandas
     df_produits = pd.read_csv(produits_csv, sep="\t")
+    df_point_de_vente = pd.read_csv(point_de_vente_csv, sep="\t")
 
-    # 🔹 Vérifier si la colonne catID et fabID existent
-    required_columns = ["catID", "fabID"]
-    for col in required_columns:
-        if col not in df_produits.columns:
-            return JsonResponse({"error": f"Colonne {col} manquante, colonnes trouvées: {df_produits.columns.tolist()}"}, status=500)
-
-    # 🔹 Créer une base SQLite temporaire
+    # 🔹 Création d'une base de données SQLite en mémoire
     conn = sqlite3.connect(":memory:")
     df_produits.to_sql("produits", conn, index=False, if_exists="replace")
+    df_point_de_vente.to_sql("pointDeVente_tous", conn, index=False, if_exists="replace")
 
-    # 🔹 Récupérer le type de requête et vérifier s'il est défini
+    # 🔹 Récupération des paramètres de la requête
     type_param = request.GET.get("type", "all")  # Par défaut, récupérer tout
     cat_id = request.GET.get("catID")
 
-    # 🔹 Vérifier si le type est valide
+    # 🔹 Vérification de la validité du type de requête
     if type_param not in QUERY_MAP:
         return JsonResponse({"error": "Type de requête inconnu"}, status=400)
-
-    # 🔹 Récupérer la requête SQL correspondante
+    # 🔹 Construction de la requête SQL
     sql_query = QUERY_MAP[type_param]
 
-    # 🔹 Remplacer les variables dynamiques dans la requête
     try:
         query = sql_query.format(catID=cat_id)
     except KeyError as e:
         return JsonResponse({"error": f"Paramètre manquant: {e}"}, status=400)
 
-    # 🔹 Exécuter la requête et récupérer les résultats
+    # 🔹 Exécution de la requête SQL
     df_result = pd.read_sql(query, conn)
     conn.close()
 
-    # 🔹 Convertir le résultat en JSON et renvoyer la réponse
+    # 🔹 Conversion du résultat en JSON et envoi de la réponse
     data = df_result.to_dict(orient="records")
     return JsonResponse(data, safe=False)

@@ -1,6 +1,6 @@
 from django.urls import path
-from .views import api_produits_filtre  # ✅ Vérifier que l'import est correct
+from .views import api_produits_filtre
 
 urlpatterns = [
-    path('produits/<int:cat_id>/', api_produits_filtre),  # Route API pour filtrer les produits
+    path('produits/', api_produits_filtre),  # Aucune donnée imposée dans l'URL
 ]

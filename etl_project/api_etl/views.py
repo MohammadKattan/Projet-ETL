@@ -48,6 +48,25 @@ QUERY_MAP = {
         ORDER BY score DESC
         LIMIT 10;
     """,
+    "nb-mag-date" : """
+        SELECT COUNT(DISTINCT magID) as nbmag
+            FROM pointDeVente_tous
+            WHERE catID = {catID}
+            AND SUBSTR(dateID, 5, 2) = '{mois}'  
+            AND SUBSTR(dateID, 1, 4) = COALESCE('{annee}', strftime('%Y', 'now'))
+    """,
+    "nb-mag-periode" : """
+        SELECT COUNT(DISTINCT magID) AS nbmag
+            FROM pointDeVente_tous
+            WHERE catID = {catID}
+            AND SUBSTR(dateID, 1, 4) = COALESCE('{annee}', strftime('%Y', 'now'))
+            AND (
+                (SUBSTR(dateID, 5, 2) BETWEEN '01' AND '03' AND {periode} = 1) OR
+                (SUBSTR(dateID, 5, 2) BETWEEN '04' AND '06' AND {periode} = 2) OR
+                (SUBSTR(dateID, 5, 2) BETWEEN '07' AND '09' AND {periode} = 3) OR
+                (SUBSTR(dateID, 5, 2) BETWEEN '10' AND '12' AND {periode} = 4)
+            );
+    """,
     "all": "SELECT * FROM produits"
 }
 
@@ -75,6 +94,9 @@ def api_produits_filtre(request):
     cat_id = request.GET.get("catID")
     mag_id = request.GET.get("magID")
     fab_id = request.GET.get("fabID")
+    mois = request.GET.get("mois")
+    annee = request.GET.get("annee")
+    periode = request.GET.get("periode")
 
     # 🔹 Vérification de la validité du type de requête
     if type_param not in QUERY_MAP and type_param != "top-1" and type_param != "avg-cat-fab-10-mag":
@@ -96,7 +118,7 @@ def api_produits_filtre(request):
     sql_query = QUERY_MAP[type_param]
 
     try:
-        query = sql_query.format(catID=cat_id,magID= mag_id,fabID = fab_id)
+        query = sql_query.format(catID=cat_id,magID= mag_id,fabID = fab_id, mois = mois, annee = annee, periode = periode)
     except KeyError as e:
         return JsonResponse({"error": f"Paramètre manquant: {e}"}, status=400)
 

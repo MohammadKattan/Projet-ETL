@@ -8,6 +8,8 @@ from django.conf import settings
 QUERY_MAP = {
     "cat": "SELECT * FROM produits WHERE catID = {catID}",
     
+    "mag-cat": "SELECT COUNT(DISTINCT magID) AS total_magasins FROM pointDeVente_tous WHERE catID = {catID}",
+    
     "fab-cat": "SELECT COUNT(DISTINCT fabID) AS total_fabricants FROM produits WHERE catID = {catID}",
     
     "avg-prod-per-fab": """

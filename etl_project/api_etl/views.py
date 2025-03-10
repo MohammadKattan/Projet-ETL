@@ -7,16 +7,20 @@ from django.conf import settings
 # 🔹 Dictionnaire des requêtes SQL dynamiques
 QUERY_MAP = {
     "cat": "SELECT * FROM produits WHERE catID = {catID}",
+    
     "fab-cat": "SELECT COUNT(DISTINCT fabID) AS total_fabricants FROM produits WHERE catID = {catID}",
+    
     "avg-prod-per-fab": """
         SELECT AVG(product_count) AS avg_products_per_fab
         FROM (
-            SELECT fabID, COUNT(prodID) AS product_count
+            SELECT fabID, COUNT(DISTINCT prodID) AS product_count
             FROM produits
             WHERE catID = {catID}
+            AND (dateID BETWEEN {debut} AND {fin})
             GROUP BY fabID
         ) AS subquery
     """,
+    
     "top-magasins": """
         SELECT magID,
             COUNT(DISTINCT fabID) AS total_fabricants,
@@ -33,6 +37,7 @@ QUERY_MAP = {
         ORDER BY score DESC
         LIMIT 10;
     """,
+    
     "top-magasins-cat": """
         SELECT magID,
             COUNT(DISTINCT fabID) AS total_fabricants,
@@ -48,13 +53,14 @@ QUERY_MAP = {
         ORDER BY score DESC
         LIMIT 10;
     """,
+    
     "nb-mag-date" : """
         SELECT COUNT(DISTINCT magID) as nbmag
             FROM pointDeVente_tous
             WHERE catID = {catID}
-            AND SUBSTR(dateID, 5, 2) = '{mois}'  
-            AND SUBSTR(dateID, 1, 4) = COALESCE('{annee}', strftime('%Y', 'now'))
+            AND (dateID BETWEEN {debut} AND {fin})
     """,
+    
     "nb-mag-periode" : """
         SELECT COUNT(DISTINCT magID) AS nbmag
             FROM pointDeVente_tous
@@ -66,6 +72,19 @@ QUERY_MAP = {
                 (SUBSTR(dateID, 5, 2) BETWEEN '07' AND '09' AND {periode} = 3) OR
                 (SUBSTR(dateID, 5, 2) BETWEEN '10' AND '12' AND {periode} = 4)
             );
+    """,
+    
+    "nb-mag-all" : """
+        SELECT 
+            SUBSTR(dateID, 1, 4) || '-' || SUBSTR(dateID, 5, 2) AS mois, 
+            COUNT(DISTINCT magID) AS nbmag
+            FROM pointDeVente_tous
+                WHERE catID = {catID}
+                AND dateID >= '{annee}{mois}01'  -- début de la date choisie (format YYYYMMDD)
+                AND dateID <= strftime('%Y%m%d', 'now')  -- date actuelle (format YYYYMMDD)
+                GROUP BY mois
+                ORDER BY mois;
+
     """,
     "all": "SELECT * FROM produits"
 }
@@ -97,6 +116,8 @@ def api_produits_filtre(request):
     mois = request.GET.get("mois")
     annee = request.GET.get("annee")
     periode = request.GET.get("periode")
+    debut = request.GET.get("debut")
+    fin = request.GET.get("fin")
 
     # 🔹 Vérification de la validité du type de requête
     if type_param not in QUERY_MAP and type_param != "top-1" and type_param != "avg-cat-fab-10-mag":
@@ -118,7 +139,7 @@ def api_produits_filtre(request):
     sql_query = QUERY_MAP[type_param]
 
     try:
-        query = sql_query.format(catID=cat_id,magID= mag_id,fabID = fab_id, mois = mois, annee = annee, periode = periode)
+        query = sql_query.format(catID=cat_id,magID= mag_id,fabID = fab_id, mois = mois, annee = annee, periode = periode, debut = debut, fin = fin)
     except KeyError as e:
         return JsonResponse({"error": f"Paramètre manquant: {e}"}, status=400)
 
@@ -175,29 +196,51 @@ def get_best_magasin_for_category(conn, cat_id):
 
 def get_avg_for_fab_of_top_magasin(conn, cat_id, fab_id, df_top_mag):
     # Convertir les magID en tuple pour être utilisé dans la requête SQL
-    top_10_magasins_ID = tuple(df_top_mag["magID"].tolist())
+    top_magasins_ID = tuple(df_top_mag["magID"].tolist())
+    # Vérifier si la liste est vide
+    if not top_magasins_ID:
+        return JsonResponse({"error": "Aucun magasin trouvé"}, status=404)
     # Requête SQL pour obtenir les produits par magasin
     query_best_seller = f"""
         SELECT magID, catID,
             COUNT(DISTINCT prodID) AS total_produits
         FROM pointDeVente_tous
-        WHERE catID = {cat_id} AND fabID = {fab_id} AND magID IN {top_10_magasins_ID}
+        WHERE catID = {cat_id} AND fabID = {fab_id} AND magID IN {top_magasins_ID}
         GROUP BY magID
     """
     df_best_seller = pd.read_sql(query_best_seller, conn)
-    if df_best_seller.empty:
-        return JsonResponse({"error": "Aucun meilleur magasin trouvé"}, status=404)
-    # Convertir les résultats de la requête en dictionnaire
+    # Convertir les résultats en dictionnaire
     best_seller_dict = dict(zip(df_best_seller["magID"], df_best_seller["total_produits"]))
-    # Créer un dictionnaire de top magasins avec leurs produits
+    # Convertir `df_top_mag` en dictionnaire pour un accès plus rapide
     top_mag_dict = dict(zip(df_top_mag["magID"], df_top_mag["total_produits"]))
-    res = 0.0
 
-    for magID in best_seller_dict:
-        # Vérification si magID existe dans les deux dictionnaires et que total_produits n'est pas zéro
-        if magID in top_mag_dict and top_mag_dict[magID] != 0:
-            res += best_seller_dict[magID] / top_mag_dict[magID] 
-    # Calculer la moyenne si des magasins valides ont été trouvés
-    res = (res / len(top_10_magasins_ID))*100
-    return JsonResponse({"average": res})
+    top_mag_list = []
+    total_percentage = 0.0
+    valid_count = 0
+
+    # Parcours de **tous** les magasins de df_top_mag
+    for magID, total_produits_top in top_mag_dict.items():
+        total_produits_best = best_seller_dict.get(magID, 0)  # 0 si magID n'existe pas dans best_seller_dict
+
+        if total_produits_top != 0:
+            percentage = (total_produits_best / total_produits_top) * 100
+            total_percentage += percentage
+            valid_count += 1
+        else:
+            percentage = 0.0
+
+        top_mag_list.append({
+            "magID": magID,
+            "total_produits": total_produits_top,
+            "nb_produits_fab" : total_produits_best,
+            "percentage": percentage
+        })
+
+    # Calcul de la moyenne générale uniquement sur les magasins valides
+    avg_percentage = total_percentage / valid_count if valid_count > 0 else 0.0
+
+    return JsonResponse({
+        "average": avg_percentage,
+        "top_mag": top_mag_list
+    })
 

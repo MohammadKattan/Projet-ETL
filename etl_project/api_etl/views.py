@@ -6,84 +6,84 @@ from django.conf import settings
 
 # 🔹 Dictionnaire des requêtes SQL dynamiques
 QUERY_MAP = {
-    "cat": "SELECT * FROM produits WHERE catID = {catID}",
+    "cat": "SELECT * FROM produits WHERE catid = {catID}",
     
-    "mag-cat": "SELECT COUNT(DISTINCT magID) AS total_magasins FROM pointDeVente_tous WHERE catID = {catID}",
+    "mag-cat": "SELECT COUNT(DISTINCT magid) AS total_magasins FROM points_de_vente WHERE catid = {catID}",
     
-    "fab-cat": "SELECT COUNT(DISTINCT fabID) AS total_fabricants FROM produits WHERE catID = {catID}",
+    "fab-cat": "SELECT COUNT(DISTINCT fabid) AS total_fabricants FROM produits WHERE catid = {catID}",
     
     "avg-prod-per-fab": """
         SELECT AVG(product_count) AS avg_products_per_fab
         FROM (
-            SELECT fabID, COUNT(DISTINCT prodID) AS product_count
+            SELECT fabid, COUNT(DISTINCT prodid) AS product_count
             FROM produits
-            WHERE catID = {catID}
-            AND (dateID BETWEEN {debut} AND {fin})
-            GROUP BY fabID
+            WHERE catid = {catID}
+            AND dateid BETWEEN '{debut}' AND '{fin}'
+            GROUP BY fabid
         ) AS subquery
     """,
     
     "top-magasins": """
-        SELECT magID,
-            COUNT(DISTINCT fabID) AS total_fabricants,
-            COUNT(DISTINCT catID) AS total_categories,
-            COUNT(DISTINCT prodID) AS total_produits,
+        SELECT magid,
+            COUNT(DISTINCT fabid) AS total_fabricants,
+            COUNT(DISTINCT catid) AS total_categories,
+            COUNT(DISTINCT prodid) AS total_produits,
             COUNT(*) AS total_ventes,
             -- Calcul du score combiné avec pondération
-            (COUNT(DISTINCT fabID) * 0.1 +
-                COUNT(DISTINCT catID) * 0.2 +
-                COUNT(DISTINCT prodID) * 0.3 +
+            (COUNT(DISTINCT fabid) * 0.1 +
+                COUNT(DISTINCT catid) * 0.2 +
+                COUNT(DISTINCT prodid) * 0.3 +
                 COUNT(*) * 0.4) AS score
-        FROM pointDeVente_tous
-        GROUP BY magID
+        FROM points_de_vente
+        GROUP BY magid
         ORDER BY score DESC
         LIMIT 10;
     """,
     
     "top-magasins-cat": """
-        SELECT magID,
-            COUNT(DISTINCT fabID) AS total_fabricants,
-            COUNT(DISTINCT prodID) AS total_produits,
+        SELECT magid,
+            COUNT(DISTINCT fabid) AS total_fabricants,
+            COUNT(DISTINCT prodid) AS total_produits,
             COUNT(*) AS total_ventes,
             -- Calcul du score combiné avec pondération
-            (COUNT(DISTINCT fabID) * 0.1 +
-                COUNT(DISTINCT prodID) * 0.3 +
+            (COUNT(DISTINCT fabid) * 0.1 +
+                COUNT(DISTINCT prodid) * 0.3 +
                 COUNT(*) * 0.6) AS score
-        FROM pointDeVente_tous
-        WHERE catID = {catID}
-        GROUP BY magID
+        FROM points_de_vente
+        WHERE catid = {catID}
+        GROUP BY magid
         ORDER BY score DESC
         LIMIT 10;
     """,
     
     "nb-mag-date" : """
-        SELECT COUNT(DISTINCT magID) as nbmag
-            FROM pointDeVente_tous
-            WHERE catID = {catID}
-            AND (dateID BETWEEN {debut} AND {fin})
+        SELECT COUNT(DISTINCT magid) as nbmag
+            FROM points_de_vente
+            WHERE catid = {catID}
+            AND (dateid BETWEEN {debut} AND {fin})
     """,
     
     "nb-mag-periode" : """
-        SELECT COUNT(DISTINCT magID) AS nbmag
-            FROM pointDeVente_tous
-            WHERE catID = {catID}
-            AND SUBSTR(dateID, 1, 4) = COALESCE('{annee}', strftime('%Y', 'now'))
+        SELECT COUNT(DISTINCT magid) AS nbmag
+            FROM points_de_vente
+            WHERE catid = {catID}
+            AND SUBSTR(dateid, 1, 4) = COALESCE('{annee}', strftime('%Y', 'now'))
             AND (
-                (SUBSTR(dateID, 5, 2) BETWEEN '01' AND '03' AND {periode} = 1) OR
-                (SUBSTR(dateID, 5, 2) BETWEEN '04' AND '06' AND {periode} = 2) OR
-                (SUBSTR(dateID, 5, 2) BETWEEN '07' AND '09' AND {periode} = 3) OR
-                (SUBSTR(dateID, 5, 2) BETWEEN '10' AND '12' AND {periode} = 4)
+                (SUBSTR(dateid, 5, 2) BETWEEN '01' AND '03' AND {periode} = 1) OR
+                (SUBSTR(dateid, 5, 2) BETWEEN '04' AND '06' AND {periode} = 2) OR
+                (SUBSTR(dateid, 5, 2) BETWEEN '07' AND '09' AND {periode} = 3) OR
+                (SUBSTR(dateid, 5, 2) BETWEEN '10' AND '12' AND {periode} = 4)
             );
     """,
     
     "nb-mag-all" : """
         SELECT 
-            SUBSTR(dateID, 1, 4) || '-' || SUBSTR(dateID, 5, 2) AS mois, 
-            COUNT(DISTINCT magID) AS nbmag
-            FROM pointDeVente_tous
-                WHERE catID = {catID}
-                AND dateID >= '{annee}{mois}01'  -- début de la date choisie (format YYYYMMDD)
-                AND dateID <= strftime('%Y%m%d', 'now')  -- date actuelle (format YYYYMMDD)
+            SUBSTR(dateid, 1, 4) || '-' || SUBSTR(dateid, 5, 2) AS mois, 
+            COUNT(DISTINCT magid) AS nbmag
+            FROM points_de_vente
+                WHERE catid = {catID}
+                AND dateid >= '{annee}{mois}01'  -- début de la date choisie (format YYYYMMDD)
+                AND dateid <= strftime('%Y%m%d', 'now')  -- date actuelle (format YYYYMMDD)
                 GROUP BY mois
                 ORDER BY mois;
 
@@ -92,23 +92,15 @@ QUERY_MAP = {
 }
 
 def api_produits_filtre(request):
-    # 🔹 Définition des chemins des fichiers CSV
-    produits_csv = os.path.join(settings.DATA_DIR, 'produits-tous.csv')
-    point_de_vente_csv = os.path.join(settings.DATA_DIR, 'pointsDeVente-tous.csv')
+    # 🔹 Chemin de la base de données SQLite
+    db_path = os.path.join(settings.BASE_DIR, 'database.db')
 
-    # 🔹 Vérification de l'existence des fichiers CSV
-    for fichier in [produits_csv, point_de_vente_csv]:
-        if not os.path.exists(fichier):
-            return JsonResponse({"error": f"Fichier {os.path.basename(fichier)} non trouvé"}, status=404)
+    # 🔹 Vérification de l'existence du fichier de base de données
+    if not os.path.exists(db_path):
+        return JsonResponse({"error": "Base de données non trouvée"}, status=404)
 
-    # 🔹 Chargement des fichiers CSV dans des DataFrames pandas
-    df_produits = pd.read_csv(produits_csv, sep="\t")
-    df_point_de_vente = pd.read_csv(point_de_vente_csv, sep="\t")
-
-    # 🔹 Création d'une base de données SQLite en mémoire
-    conn = sqlite3.connect(":memory:")
-    df_produits.to_sql("produits", conn, index=False, if_exists="replace")
-    df_point_de_vente.to_sql("pointDeVente_tous", conn, index=False, if_exists="replace")
+    # 🔹 Connexion à la base de données SQLite
+    conn = sqlite3.connect(db_path)
 
     # 🔹 Récupération des paramètres de la requête
     type_param = request.GET.get("type", "all")  # Par défaut, récupérer tout
@@ -133,7 +125,7 @@ def api_produits_filtre(request):
         df_top_mag = pd.read_sql(query_top_magasin_cat, conn)
         if df_top_mag.empty:
             return JsonResponse({"error": "Aucun magasin trouvé pour cette catégorie"}, status=404)
-        top_10_magasins = dict(zip(df_top_mag["magID"], df_top_mag["total_produits"]))
+        top_10_magasins = dict(zip(df_top_mag["magid"], df_top_mag["total_produits"]))
         print(top_10_magasins)
         return get_avg_for_fab_of_top_magasin(conn, cat_id, fab_id, df_top_mag)
 
@@ -141,7 +133,7 @@ def api_produits_filtre(request):
     sql_query = QUERY_MAP[type_param]
 
     try:
-        query = sql_query.format(catID=cat_id,magID= mag_id,fabID = fab_id, mois = mois, annee = annee, periode = periode, debut = debut, fin = fin)
+        query = sql_query.format(catID=cat_id, magID=mag_id, fabID=fab_id, mois=mois, annee=annee, periode=periode, debut=debut, fin=fin)
     except KeyError as e:
         return JsonResponse({"error": f"Paramètre manquant: {e}"}, status=400)
 
@@ -163,27 +155,27 @@ def get_best_magasin_for_category(conn, cat_id):
     """
 
     # Récupérer les 10 meilleurs magasins pour cette catégorie
-    top_10_query = QUERY_MAP["top-magasins"].format(catID=cat_id)
+    top_10_query = QUERY_MAP["top-magasins"].format(catid=cat_id)
     df_top_10 = pd.read_sql(top_10_query, conn)
 
     if df_top_10.empty:
         return JsonResponse({"error": "Aucun magasin trouvé pour cette catégorie"}, status=404)
 
-    top_mag_ids = tuple(df_top_10["magID"].tolist())
+    top_mag_ids = tuple(df_top_10["magid"].tolist())
 
     # Sélectionner le meilleur magasin parmi ces 10
     query_best_seller = f"""
-        SELECT magID,
-            COUNT(DISTINCT fabID) AS total_fabricants,
-            COUNT(DISTINCT prodID) AS total_produits,
+        SELECT magid,
+            COUNT(DISTINCT fabid) AS total_fabricants,
+            COUNT(DISTINCT prodid) AS total_produits,
             COUNT(*) AS total_ventes,
             -- Calcul du score combiné avec pondération
-            (COUNT(DISTINCT prodID) * 0.3 +
+            (COUNT(DISTINCT prodid) * 0.3 +
             COUNT(*) * 0.6 +
-            COUNT(DISTINCT fabID) * 0.1) AS score
-        FROM pointDeVente_tous
-        WHERE catID = {cat_id} AND magID IN {top_mag_ids}
-        GROUP BY magID
+            COUNT(DISTINCT fabid) * 0.1) AS score
+        FROM points_de_vente
+        WHERE catid = {cat_id} AND magid IN {top_mag_ids}
+        GROUP BY magid
         ORDER BY score DESC
         LIMIT 1;
     """
@@ -197,32 +189,32 @@ def get_best_magasin_for_category(conn, cat_id):
 
 
 def get_avg_for_fab_of_top_magasin(conn, cat_id, fab_id, df_top_mag):
-    # Convertir les magID en tuple pour être utilisé dans la requête SQL
-    top_magasins_ID = tuple(df_top_mag["magID"].tolist())
+    # Convertir les magid en tuple pour être utilisé dans la requête SQL
+    top_magasins_ID = tuple(df_top_mag["magid"].tolist())
     # Vérifier si la liste est vide
     if not top_magasins_ID:
         return JsonResponse({"error": "Aucun magasin trouvé"}, status=404)
     # Requête SQL pour obtenir les produits par magasin
     query_best_seller = f"""
-        SELECT magID, catID,
-            COUNT(DISTINCT prodID) AS total_produits
-        FROM pointDeVente_tous
-        WHERE catID = {cat_id} AND fabID = {fab_id} AND magID IN {top_magasins_ID}
-        GROUP BY magID
+        SELECT magid, catid,
+            COUNT(DISTINCT prodid) AS total_produits
+        FROM points_de_vente
+        WHERE catid = {cat_id} AND fabid = {fab_id} AND magid IN {top_magasins_ID}
+        GROUP BY magid
     """
     df_best_seller = pd.read_sql(query_best_seller, conn)
     # Convertir les résultats en dictionnaire
-    best_seller_dict = dict(zip(df_best_seller["magID"], df_best_seller["total_produits"]))
+    best_seller_dict = dict(zip(df_best_seller["magid"], df_best_seller["total_produits"]))
     # Convertir `df_top_mag` en dictionnaire pour un accès plus rapide
-    top_mag_dict = dict(zip(df_top_mag["magID"], df_top_mag["total_produits"]))
+    top_mag_dict = dict(zip(df_top_mag["magid"], df_top_mag["total_produits"]))
 
     top_mag_list = []
     total_percentage = 0.0
     valid_count = 0
 
     # Parcours de **tous** les magasins de df_top_mag
-    for magID, total_produits_top in top_mag_dict.items():
-        total_produits_best = best_seller_dict.get(magID, 0)  # 0 si magID n'existe pas dans best_seller_dict
+    for magid, total_produits_top in top_mag_dict.items():
+        total_produits_best = best_seller_dict.get(magid, 0)  # 0 si magid n'existe pas dans best_seller_dict
 
         if total_produits_top != 0:
             percentage = (total_produits_best / total_produits_top) * 100
@@ -232,7 +224,7 @@ def get_avg_for_fab_of_top_magasin(conn, cat_id, fab_id, df_top_mag):
             percentage = 0.0
 
         top_mag_list.append({
-            "magID": magID,
+            "magID": magid,
             "total_produits": total_produits_top,
             "nb_produits_fab" : total_produits_best,
             "percentage": percentage

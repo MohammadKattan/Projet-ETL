@@ -56,39 +56,16 @@ QUERY_MAP = {
         LIMIT 10;
     """,
     
-    "nb-mag-date" : """
-        SELECT COUNT(DISTINCT magid) as nbmag
-            FROM points_de_vente
-            WHERE catid = {catID}
-            AND (dateid BETWEEN {debut} AND {fin})
-    """,
-    
-    "nb-mag-periode" : """
-        SELECT COUNT(DISTINCT magid) AS nbmag
-            FROM points_de_vente
-            WHERE catid = {catID}
-            AND SUBSTR(dateid, 1, 4) = COALESCE('{annee}', strftime('%Y', 'now'))
-            AND (
-                (SUBSTR(dateid, 5, 2) BETWEEN '01' AND '03' AND {periode} = 1) OR
-                (SUBSTR(dateid, 5, 2) BETWEEN '04' AND '06' AND {periode} = 2) OR
-                (SUBSTR(dateid, 5, 2) BETWEEN '07' AND '09' AND {periode} = 3) OR
-                (SUBSTR(dateid, 5, 2) BETWEEN '10' AND '12' AND {periode} = 4)
-            );
-    """,
-    
-    "nb-mag-all" : """
+    "nb-mag-cat-date" : """
         SELECT 
-            SUBSTR(dateid, 1, 4) || '-' || SUBSTR(dateid, 5, 2) AS mois, 
+            strftime('%Y-%m', dateid) AS mois,
             COUNT(DISTINCT magid) AS nbmag
             FROM points_de_vente
                 WHERE catid = {catID}
-                AND dateid >= '{annee}{mois}01'  -- début de la date choisie (format YYYYMMDD)
-                AND dateid <= strftime('%Y%m%d', 'now')  -- date actuelle (format YYYYMMDD)
+                AND strftime('%Y', dateid) = '{annee}'
                 GROUP BY mois
                 ORDER BY mois;
-
-    """,
-    "all": "SELECT * FROM produits"
+    """
 }
 
 def api_produits_filtre(request):
@@ -147,12 +124,6 @@ def api_produits_filtre(request):
 
 
 def get_best_magasin_for_category(conn, cat_id):
-    """
-    Fonction qui trouve le meilleur magasin pour une catégorie donnée selon le score :
-    - Nombre de produits vendus pour cette catégorie * 0.4
-    - Nombre de lignes d'opération * 0.3
-    - Nombre de fabricants présents dans ce magasin pour cette catégorie * 0.3
-    """
 
     # Récupérer les 10 meilleurs magasins pour cette catégorie
     top_10_query = QUERY_MAP["top-magasins"].format(catid=cat_id)

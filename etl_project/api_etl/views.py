@@ -121,7 +121,7 @@ def api_produits_filtre(request):
         return get_best_magasin_for_category(conn, cat_id)
     if type_param == "avg-cat-fab-10-mag":
         # Exécuter la requête "top-magasins-cat"
-        query_top_magasin_cat = QUERY_MAP["top-magasins-cat"].format(catID=cat_id)
+        query_top_magasin_cat = QUERY_MAP["top-magasins-cat"].format(catID=cat_id,debut=debut,fin=fin)
         df_top_mag = pd.read_sql(query_top_magasin_cat, conn)
         if df_top_mag.empty:
             return JsonResponse({"error": "Aucun magasin trouvé pour cette catégorie"}, status=404)
@@ -143,6 +143,7 @@ def api_produits_filtre(request):
 
     # 🔹 Conversion du résultat en JSON et envoi de la réponse
     data = df_result.to_dict(orient="records")
+    print(data)
     return JsonResponse(data, safe=False)
 
 

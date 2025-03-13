@@ -65,7 +65,28 @@ QUERY_MAP = {
                 AND strftime('%Y', dateid) = '{annee}'
                 GROUP BY mois
                 ORDER BY mois;
-    """
+    """,
+
+"score-evolution": """
+    SELECT 
+        strftime('%Y-%m', dateid) AS mois,
+        COUNT(*) AS total_ventes,
+        SUM(CASE WHEN fabid = {fabID} THEN 1 ELSE 0 END) AS ventes_fab,
+        -- ✅ Correction : éviter NaN en utilisant COALESCE
+        COALESCE(
+            (SUM(CASE WHEN fabid = {fabID} THEN 1 ELSE 0 END) * 100.0 / NULLIF(COUNT(*), 0)), 
+            0.0
+        ) AS score_sante
+    FROM points_de_vente
+    WHERE catid = {catID}
+    AND dateid BETWEEN '2022-01-01' AND DATE('now')
+    GROUP BY mois
+    ORDER BY mois;
+"""
+
+
+
+
 }
 
 def api_produits_filtre(request):
@@ -158,6 +179,19 @@ def get_best_magasin_for_category(conn, cat_id):
 
     return JsonResponse(df_best_seller.to_dict(orient="records"), safe=False)
 
+    if type_param == "score-evolution":
+        if not cat_id or not fab_id:
+            return JsonResponse({"error": "catID et fabID sont requis"}, status=400)
+
+        # Exécuter la requête "score-evolution"
+        query_score_evolution = QUERY_MAP["score-evolution"].format(catID=cat_id, fabID=fab_id)
+        df_score_evolution = pd.read_sql(query_score_evolution, conn)
+
+        if df_score_evolution.empty:
+            return JsonResponse({"error": "Aucune donnée disponible"}, status=404)
+
+        return JsonResponse(df_score_evolution.to_dict(orient="records"), safe=False)
+
 
 def get_avg_for_fab_of_top_magasin(conn, cat_id, fab_id, df_top_mag):
     # Convertir les magid en tuple pour être utilisé dans la requête SQL
@@ -208,4 +242,6 @@ def get_avg_for_fab_of_top_magasin(conn, cat_id, fab_id, df_top_mag):
         "average": avg_percentage,
         "top_mag": top_mag_list
     })
+
+
 

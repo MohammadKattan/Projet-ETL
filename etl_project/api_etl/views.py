@@ -35,6 +35,7 @@ QUERY_MAP = {
                 COUNT(DISTINCT prodid) * 0.3 +
                 COUNT(*) * 0.4) AS score
         FROM points_de_vente
+        WHERE dateid BETWEEN '{debut}' AND '{fin}'
         GROUP BY magid
         ORDER BY score DESC
         LIMIT 10;
@@ -51,6 +52,7 @@ QUERY_MAP = {
                 COUNT(*) * 0.6) AS score
         FROM points_de_vente
         WHERE catid = {catID}
+        AND dateid BETWEEN '{debut}' AND '{fin}'
         GROUP BY magid
         ORDER BY score DESC
         LIMIT 10;

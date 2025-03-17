@@ -3,6 +3,7 @@ import sqlite3
 from django.http import JsonResponse
 import os
 from django.conf import settings
+from datetime import date
 
 # 🔹 Dictionnaire des requêtes SQL dynamiques
 QUERY_MAP = {
@@ -114,7 +115,7 @@ def api_produits_filtre(request):
     fin = request.GET.get("fin")
 
     # 🔹 Vérification de la validité du type de requête
-    if type_param not in QUERY_MAP and type_param != "top-1" and type_param != "avg-cat-fab-10-mag":
+    if type_param not in QUERY_MAP and type_param != "top-1" and type_param != "avg-cat-fab-10-mag" and type_param != "score-sante-touts-les-mois":
         return JsonResponse({"error": "Type de requête inconnu"}, status=400)
 
     if type_param == "top-1": 
@@ -128,6 +129,17 @@ def api_produits_filtre(request):
         top_10_magasins = dict(zip(df_top_mag["magid"], df_top_mag["total_produits"]))
         print(top_10_magasins)
         return get_avg_for_fab_of_top_magasin(conn, cat_id, fab_id, df_top_mag)
+    if type_param == "score-sante-touts-les-mois":
+        today = date.today().strftime('%Y-%m-%d')
+        print(today)
+        # Exécuter la requête "top-magasins-cat"
+        query_top_magasin_cat = QUERY_MAP["top-magasins-cat"].format(catID=cat_id,debut='2022-01-01',fin=today)
+        df_top_mag = pd.read_sql(query_top_magasin_cat, conn)
+        if df_top_mag.empty:
+            return JsonResponse({"error": "Aucun magasin trouvé pour cette catégorie"}, status=404)
+        top_10_magasins = dict(zip(df_top_mag["magid"], df_top_mag["total_produits"]))
+        print(top_10_magasins)
+        return get_avg_for_fab_of_top_magasin2(conn, cat_id, fab_id, df_top_mag)
 
     # 🔹 Construction de la requête SQL
     sql_query = QUERY_MAP[type_param]
@@ -246,5 +258,108 @@ def get_avg_for_fab_of_top_magasin(conn, cat_id, fab_id, df_top_mag):
         "top_mag": top_mag_list
     })
 
+
+import pandas as pd
+
+import pandas as pd
+
+def get_avg_for_fab_of_top_magasin2(conn, cat_id, fab_id, df_top_mag):
+    # Convertir les magid en tuple pour être utilisé dans la requête SQL
+    top_magasins_ID = tuple(df_top_mag["magid"].tolist())
+    
+    # Vérifier si la liste est vide
+    if not top_magasins_ID:
+        return JsonResponse({"error": "Aucun magasin trouvé"}, status=404)
+    
+    # Requête SQL pour obtenir les produits par mois et année pour tous les magasins du top 10
+    query_best_seller = f"""
+        SELECT strftime('%Y-%m', dateID) AS mois_annee, 
+               COUNT(DISTINCT prodid) AS total_produits
+        FROM points_de_vente
+        WHERE catid = {cat_id} AND fabid = {fab_id} AND magid IN {top_magasins_ID}
+        GROUP BY mois_annee
+        ORDER BY mois_annee
+    """
+    
+    # Exécution de la requête et récupération des résultats
+    df_best_seller = pd.read_sql(query_best_seller, conn)
+    
+    # Vérifier si le résultat est vide
+    if df_best_seller.empty:
+        return JsonResponse({"error": "Aucune donnée trouvée pour cette période"}, status=404)
+
+    # Dictionnaire pour stocker les résultats par mois
+    mois_annee_dict = {}
+
+    for index, row in df_best_seller.iterrows():
+        mois_annee = row['mois_annee']
+        total_produits = row['total_produits']
+        mois_annee_dict[mois_annee] = total_produits
+
+    # Requête SQL pour obtenir les produits totaux par mois et magasin
+    query_total_produits_top_mag = f"""
+        SELECT magid, strftime('%Y-%m', dateID) AS mois_annee, 
+               COUNT(DISTINCT prodid) AS total_produits
+        FROM points_de_vente
+        WHERE catid = {cat_id} AND fabid = {fab_id} AND magid IN {top_magasins_ID}
+        GROUP BY magid, mois_annee
+        ORDER BY mois_annee
+    """
+    
+    # Exécution de la requête et récupération des résultats
+    df_total_produits_top_mag = pd.read_sql(query_total_produits_top_mag, conn)
+    
+    # Dictionnaire pour stocker les produits de chaque magasin par mois
+    top_mag_dict = dict(zip(df_top_mag["magid"], df_top_mag["total_produits"]))
+
+    # Liste pour stocker les résultats pour chaque mois
+    top_mag_list = []
+    total_percentage = 0.0
+    valid_count = 0
+
+    # Créer une liste complète des mois pour la période
+    mois_list = pd.date_range("2022-01-01", pd.to_datetime("today"), freq="MS").strftime("%Y-%m").tolist()
+
+    # Parcours des mois et calcul des pourcentages
+    for mois_annee in mois_list:
+        total_percentage_for_month = 0.0
+        count_for_month = 0
+
+        # Parcours des magasins
+        for magid, total_produits_top in top_mag_dict.items():
+            # Filtrer les produits par magasin et mois
+            mois_data = df_total_produits_top_mag[df_total_produits_top_mag['magid'] == magid]
+            mois_data = mois_data[mois_data['mois_annee'] == mois_annee]
+            
+            if not mois_data.empty:
+                total_produits_best = mois_data['total_produits'].values[0]
+                total_produits_for_month = mois_annee_dict[mois_annee]  # Total pour le mois concerné
+
+                if total_produits_for_month != 0 and total_produits_best != 0:
+                    # Calcul du pourcentage par rapport au total des produits pour le mois
+                    percentage = (total_produits_best / total_produits_for_month) * 100
+                    total_percentage_for_month += percentage
+                    count_for_month += 1
+        
+        # Si des magasins ont des données, calculer la moyenne du pourcentage
+        if count_for_month > 0:
+            avg_percentage_for_month = total_percentage_for_month / count_for_month
+            total_percentage += avg_percentage_for_month
+            valid_count += 1
+        else:
+            avg_percentage_for_month = 0.0  # Si aucun magasin n'a de données, on met 0
+        
+        top_mag_list.append({
+            "mois_annee": mois_annee,
+            "avg_percentage": avg_percentage_for_month
+        })
+    
+    # Calcul de la moyenne générale uniquement sur les mois valides
+    avg_percentage = total_percentage / valid_count if valid_count > 0 else 0.0
+
+    return JsonResponse({
+        "average": avg_percentage,
+        "top_mag": top_mag_list
+    })
 
 

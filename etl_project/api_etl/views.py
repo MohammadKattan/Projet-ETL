@@ -261,8 +261,6 @@ def get_avg_for_fab_of_top_magasin(conn, cat_id, fab_id, df_top_mag):
 
 import pandas as pd
 
-import pandas as pd
-
 def get_avg_for_fab_of_top_magasin2(conn, cat_id, fab_id, df_top_mag):
     # Convertir les magid en tuple pour être utilisé dans la requête SQL
     top_magasins_ID = tuple(df_top_mag["magid"].tolist())
@@ -333,11 +331,8 @@ def get_avg_for_fab_of_top_magasin2(conn, cat_id, fab_id, df_top_mag):
             
             if not mois_data.empty:
                 total_produits_best = mois_data['total_produits'].values[0]
-                total_produits_for_month = mois_annee_dict[mois_annee]  # Total pour le mois concerné
-
-                if total_produits_for_month != 0 and total_produits_best != 0:
-                    # Calcul du pourcentage par rapport au total des produits pour le mois
-                    percentage = (total_produits_best / total_produits_for_month) * 100
+                if total_produits_top != 0:
+                    percentage = (total_produits_best / total_produits_top) * 100
                     total_percentage_for_month += percentage
                     count_for_month += 1
         
@@ -361,5 +356,4 @@ def get_avg_for_fab_of_top_magasin2(conn, cat_id, fab_id, df_top_mag):
         "average": avg_percentage,
         "top_mag": top_mag_list
     })
-
 

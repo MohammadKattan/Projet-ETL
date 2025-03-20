@@ -86,12 +86,7 @@ QUERY_MAP = {
     GROUP BY mois
     ORDER BY mois;
 """
-
-
-
-
 }
-
 def api_produits_filtre(request):
     # 🔹 Chemin de la base de données SQLite
     db_path = os.path.join(settings.BASE_DIR, 'database.db')
@@ -258,9 +253,6 @@ def get_avg_for_fab_of_top_magasin(conn, cat_id, fab_id, df_top_mag):
         "top_mag": top_mag_list
     })
 
-
-import pandas as pd
-
 def get_avg_for_fab_of_top_magasin2(conn, cat_id, fab_id, df_top_mag):
     # Convertir les magid en tuple pour être utilisé dans la requête SQL
     top_magasins_ID = tuple(df_top_mag["magid"].tolist())
@@ -303,39 +295,31 @@ def get_avg_for_fab_of_top_magasin2(conn, cat_id, fab_id, df_top_mag):
         GROUP BY magid, mois_annee
         ORDER BY mois_annee
     """
-    
     # Exécution de la requête et récupération des résultats
     df_total_produits_top_mag = pd.read_sql(query_total_produits_top_mag, conn)
-    
     # Dictionnaire pour stocker les produits de chaque magasin par mois
     top_mag_dict = dict(zip(df_top_mag["magid"], df_top_mag["total_produits"]))
-
     # Liste pour stocker les résultats pour chaque mois
     top_mag_list = []
     total_percentage = 0.0
     valid_count = 0
-
     # Créer une liste complète des mois pour la période
     mois_list = pd.date_range("2022-01-01", pd.to_datetime("today"), freq="MS").strftime("%Y-%m").tolist()
-
     # Parcours des mois et calcul des pourcentages
     for mois_annee in mois_list:
         total_percentage_for_month = 0.0
         count_for_month = 0
-
         # Parcours des magasins
         for magid, total_produits_top in top_mag_dict.items():
             # Filtrer les produits par magasin et mois
             mois_data = df_total_produits_top_mag[df_total_produits_top_mag['magid'] == magid]
             mois_data = mois_data[mois_data['mois_annee'] == mois_annee]
-            
             if not mois_data.empty:
                 total_produits_best = mois_data['total_produits'].values[0]
                 if total_produits_top != 0:
                     percentage = (total_produits_best / total_produits_top) * 100
                     total_percentage_for_month += percentage
                     count_for_month += 1
-        
         # Si des magasins ont des données, calculer la moyenne du pourcentage
         if count_for_month > 0:
             avg_percentage_for_month = total_percentage_for_month / count_for_month
@@ -343,15 +327,12 @@ def get_avg_for_fab_of_top_magasin2(conn, cat_id, fab_id, df_top_mag):
             valid_count += 1
         else:
             avg_percentage_for_month = 0.0  # Si aucun magasin n'a de données, on met 0
-        
         top_mag_list.append({
             "mois_annee": mois_annee,
             "avg_percentage": avg_percentage_for_month
         })
-    
     # Calcul de la moyenne générale uniquement sur les mois valides
     avg_percentage = total_percentage / valid_count if valid_count > 0 else 0.0
-
     return JsonResponse({
         "average": avg_percentage,
         "top_mag": top_mag_list
